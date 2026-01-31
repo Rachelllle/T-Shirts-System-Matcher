@@ -1,0 +1,124 @@
+
+services:
+  namenode:
+    image: bde2020/hadoop-namenode:2.0.0-hadoop3.2.1-java8
+    container_name: namenode
+    restart: always
+    ports:
+      - 9870:9870
+      - 9000:9000
+    volumes:
+      - hadoop_namenode:/hadoop/dfs/name
+      - ./hadoop/contenue:/contenue
+    environment:
+      CLUSTER_NAME: "test"
+      HADOOP_USER_NAME: "dataUser"
+    env_file:
+      - ./hadoop/hadoop.env
+    networks:
+      - hadoopnet
+
+  datanode:
+    image: bde2020/hadoop-datanode:2.0.0-hadoop3.2.1-java8
+    container_name: datanode
+    restart: always
+    ports:
+      - 9864:9864
+      - 9866:9866
+      - 9867:9867
+    volumes:
+      - hadoop_datanode:/hadoop/dfs/data
+      - ./hadoop/contenue:/contenue
+    environment:
+      SERVICE_PRECONDITION: "namenode:9870"
+      HADOOP_USER_NAME: "dataUser"
+    env_file:
+      - ./hadoop/hadoop.env
+    networks:
+      - hadoopnet
+  
+  resourcemanager:
+    image: bde2020/hadoop-resourcemanager:2.0.0-hadoop3.2.1-java8
+    container_name: resourcemanager
+    restart: always
+    environment:
+      SERVICE_PRECONDITION: "namenode:9000 namenode:9870 datanode:9864"
+      HADOOP_USER_NAME: "dataUser"
+    env_file:
+      - ./hadoop/hadoop.env
+    networks:
+      - hadoopnet
+
+  nodemanager:
+    image: bde2020/hadoop-nodemanager:2.0.0-hadoop3.2.1-java8
+    container_name: nodemanager
+    restart: always
+    environment:
+      SERVICE_PRECONDITION: "namenode:9000 namenode:9870 datanode:9864 resourcemanager:8088"
+      HADOOP_USER_NAME: "dataUser"
+    env_file:
+      - ./hadoop/hadoop.env
+    networks:
+      - hadoopnet
+  
+  historyserver:
+    image: bde2020/hadoop-historyserver:2.0.0-hadoop3.2.1-java8
+    container_name: historyserver
+    restart: always
+    environment:
+      SERVICE_PRECONDITION: "namenode:9000 namenode:9870 datanode:9864 resourcemanager:8088"
+      HADOOP_USER_NAME: "dataUser"
+    volumes:
+      - hadoop_historyserver:/hadoop/yarn/timeline
+    env_file:
+      - ./hadoop/hadoop.env
+    networks:
+      - hadoopnet
+
+
+  spark-app:
+    image: "${SPARK_IMAGE:-apache/spark}:${SPARK_TAG:-3.5.1}"
+    container_name: spark-app
+    depends_on:
+      - namenode
+      - datanode
+    command:
+      - bash
+      - -lc
+      - >
+        /opt/spark/bin/spark-submit --class CBIRTShirt --master local[*] /opt/spark-app/app.jar
+    environment:
+      HDFS_NAMENODE: "hdfs://namenode:9000"
+      HADOOP_USER_NAME: "dataUser"
+      SPARK_DRIVER_EXTRA_JAVA_OPTIONS: "-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005"
+    volumes:
+      - type: bind
+        source: ./src/scala/target/scala-2.12/scala_2.12-0.1.0-SNAPSHOT.jar
+        target: /opt/spark-app/app.jar
+        read_only: true
+        bind:
+          create_host_path: false
+    ports:
+      - 5005:5005
+    networks:
+      - hadoopnet
+
+
+  
+volumes:
+  hadoop_namenode:
+  hadoop_datanode:
+  hadoop_historyserver:
+
+
+networks:
+  hadoopnet:
+    driver: bridge
+    name: hadoopnet
+    driver_opts:
+      com.docker.network.bridge.name: br-hadoopnet
+      com.docker.network.bridge.host_binding_ipv4: "0.0.0.0"
+    ipam:
+      driver: default
+      config:
+        - subnet: "172.28.0.0/16"
